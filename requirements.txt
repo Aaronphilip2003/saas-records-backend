@@ -10,3 +10,6 @@ pdfplumber==0.11.4
 python-jose[cryptography]==3.3.0
 httpx[http2]>=0.26,<0.28
 python-dotenv==1.0.1
+google-auth==2.35.0
+google-auth-oauthlib==1.2.1
+google-api-python-client==2.154.0
