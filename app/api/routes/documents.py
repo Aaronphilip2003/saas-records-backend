@@ -157,6 +157,44 @@ async def trigger_extraction(
     return {"message": "Extraction started", "document_id": document_id}
 
 
+# ─── Delete ──────────────────────────────────────────────────────────────────
+
+@router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_document(
+    document_id: str,
+    user: dict = Depends(get_current_user),
+):
+    # Fetch the document first to get file_url
+    result = (
+        supabase.table("documents")
+        .select("id, file_url, status")
+        .eq("id", document_id)
+        .eq("user_id", user["id"])
+        .single()
+        .execute()
+    )
+
+    if not result.data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+
+    doc = result.data
+
+    # 1. Delete file from Storage
+    if doc.get("file_url"):
+        try:
+            marker = f"/object/public/{settings.storage_bucket}/"
+            storage_path = doc["file_url"].split(marker)[-1]
+            supabase.storage.from_(settings.storage_bucket).remove([storage_path])
+        except Exception:
+            pass  # Don't block deletion if file is already gone
+
+    # 2. Delete associated business_records
+    supabase.table("business_records").delete().eq("source_id", document_id).execute()
+
+    # 3. Delete the document row
+    supabase.table("documents").delete().eq("id", document_id).eq("user_id", user["id"]).execute()
+
+
 # ─── Status polling ───────────────────────────────────────────────────────────
 
 @router.get("/{document_id}/status", response_model=DocumentStatusResponse)
