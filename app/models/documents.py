@@ -9,6 +9,7 @@ class DocumentStatus(str, Enum):
     extracted = "extracted"
     reviewed = "reviewed"
     saved = "saved"
+    error = "error"
 
 
 class DocumentType(str, Enum):
@@ -35,3 +36,4 @@ class DocumentStatusResponse(BaseModel):
     status: DocumentStatus
     document_type: DocumentType | None = None
     extracted_data: dict[str, Any] | None = None
+    error: str | None = None
