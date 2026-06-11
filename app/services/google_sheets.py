@@ -20,14 +20,24 @@ INVOICE_HEADERS = [
 
 SUMMARY_HEADERS = ["Month", "Invoice Count", "Total Invoiced", "Total Paid", "Total Pending", "Total Overdue"]
 
-MONTHS = [
-    "Jan 2025", "Feb 2025", "Mar 2025", "Apr 2025", "May 2025", "Jun 2025",
-    "Jul 2025", "Aug 2025", "Sep 2025", "Oct 2025", "Nov 2025", "Dec 2025",
-    "Jan 2026", "Feb 2026", "Mar 2026", "Apr 2026", "May 2026", "Jun 2026",
-    "Jul 2026", "Aug 2026", "Sep 2026", "Oct 2026", "Nov 2026", "Dec 2026",
-]
-
 MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+
+def _build_summary_rows(year_start: int, year_end: int) -> list[list]:
+    rows = []
+    for yr in range(year_start, year_end + 1):
+        for mon in range(1, 13):
+            last = calendar.monthrange(yr, mon)[1]
+            label = f"{MONTH_NAMES[mon - 1]} {yr}"
+            rows.append([
+                label,
+                f"=COUNTIFS(Invoices!D:D,\">=\"&DATE({yr},{mon},1),Invoices!D:D,\"<=\"&DATE({yr},{mon},{last}))",
+                f"=SUMIFS(Invoices!N:N,Invoices!D:D,\">=\"&DATE({yr},{mon},1),Invoices!D:D,\"<=\"&DATE({yr},{mon},{last}))",
+                f"=SUMIFS(Invoices!N:N,Invoices!D:D,\">=\"&DATE({yr},{mon},1),Invoices!D:D,\"<=\"&DATE({yr},{mon},{last}),Invoices!P:P,\"Paid\")",
+                f"=SUMIFS(Invoices!N:N,Invoices!D:D,\">=\"&DATE({yr},{mon},1),Invoices!D:D,\"<=\"&DATE({yr},{mon},{last}),Invoices!P:P,\"Pending\")",
+                f"=SUMIFS(Invoices!N:N,Invoices!D:D,\">=\"&DATE({yr},{mon},1),Invoices!D:D,\"<=\"&DATE({yr},{mon},{last}),Invoices!P:P,\"Overdue\")",
+            ])
+    return rows
 
 _NAVY = {"red": 0.102, "green": 0.102, "blue": 0.176}
 _WHITE = {"red": 1.0, "green": 1.0, "blue": 1.0}
@@ -91,21 +101,9 @@ def create_invoice_spreadsheet(creds: Credentials) -> tuple[str, str]:
         ],
     }).execute()
 
-    # 3. Write monthly summary rows with SUMIFS formulas
-    month_rows = []
-    for m in MONTHS:
-        parts = m.split(" ")
-        mon = MONTH_NAMES.index(parts[0]) + 1
-        yr = parts[1]
-        last = calendar.monthrange(int(yr), mon)[1]
-        month_rows.append([
-            m,
-            f"=COUNTIFS(Invoices!D:D,\">=\"&DATE({yr},{mon},1),Invoices!D:D,\"<=\"&DATE({yr},{mon},{last}))",
-            f"=SUMIFS(Invoices!N:N,Invoices!D:D,\">=\"&DATE({yr},{mon},1),Invoices!D:D,\"<=\"&DATE({yr},{mon},{last}))",
-            f"=SUMIFS(Invoices!N:N,Invoices!D:D,\">=\"&DATE({yr},{mon},1),Invoices!D:D,\"<=\"&DATE({yr},{mon},{last}),Invoices!P:P,\"Paid\")",
-            f"=SUMIFS(Invoices!N:N,Invoices!D:D,\">=\"&DATE({yr},{mon},1),Invoices!D:D,\"<=\"&DATE({yr},{mon},{last}),Invoices!P:P,\"Pending\")",
-            f"=SUMIFS(Invoices!N:N,Invoices!D:D,\">=\"&DATE({yr},{mon},1),Invoices!D:D,\"<=\"&DATE({yr},{mon},{last}),Invoices!P:P,\"Overdue\")",
-        ])
+    # 3. Write monthly summary rows — default to current year -1 through +1
+    current_year = datetime.now(timezone.utc).year
+    month_rows = _build_summary_rows(current_year - 1, current_year + 1)
 
     service.spreadsheets().values().update(
         spreadsheetId=ss_id,
@@ -113,6 +111,7 @@ def create_invoice_spreadsheet(creds: Credentials) -> tuple[str, str]:
         valueInputOption="USER_ENTERED",
         body={"values": month_rows},
     ).execute()
+
 
     # 4. Formatting via batchUpdate
     inv_col_widths = [130, 220, 110, 100, 100, 160, 110, 160, 80, 90, 80, 90, 90, 100, 120, 120, 200]
@@ -285,6 +284,31 @@ def sync_invoices(user_id: str) -> dict:
             valueInputOption="USER_ENTERED",
             body={"values": rows},
         ).execute()
+
+    # Rebuild Monthly Summary dynamically based on actual invoice dates
+    current_year = datetime.now(timezone.utc).year
+    years = []
+    for rec in records.data or []:
+        date_str = (rec.get("data") or {}).get("invoice_date", "")
+        if date_str and len(date_str) >= 4:
+            try:
+                years.append(int(date_str[:4]))
+            except ValueError:
+                pass
+
+    year_start = min(years) if years else current_year
+    year_end = max(max(years) if years else current_year, current_year) + 1
+
+    summary_rows = _build_summary_rows(year_start, year_end)
+    service.spreadsheets().values().clear(
+        spreadsheetId=ss_id, range="Monthly Summary!A2:F"
+    ).execute()
+    service.spreadsheets().values().update(
+        spreadsheetId=ss_id,
+        range="Monthly Summary!A2",
+        valueInputOption="USER_ENTERED",
+        body={"values": summary_rows},
+    ).execute()
 
     # Mark all invoice records as synced
     supabase.table("business_records").update({"sync_status": "synced"}).eq("user_id", user_id).eq("record_type", "invoice").execute()
