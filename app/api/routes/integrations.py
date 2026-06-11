@@ -134,7 +134,8 @@ async def google_sync(user: dict = Depends(get_current_user)):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error("Sync failed for user %s: %s", user["id"], e)
+        import traceback
+        logger.error("Sync failed for user %s: %s\n%s", user["id"], e, traceback.format_exc())
         raise HTTPException(status_code=500, detail="Sync failed")
 
 

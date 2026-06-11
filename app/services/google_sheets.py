@@ -43,6 +43,9 @@ def _get_credentials(user_id: str) -> Credentials:
     expiry = None
     if row.get("token_expiry"):
         expiry = datetime.fromisoformat(row["token_expiry"].replace("Z", "+00:00"))
+        # google-auth uses naive utcnow() internally, so expiry must also be naive
+        if expiry.tzinfo is not None:
+            expiry = expiry.replace(tzinfo=None)
 
     creds = Credentials(
         token=row["access_token"],
@@ -282,6 +285,9 @@ def sync_invoices(user_id: str) -> dict:
             valueInputOption="USER_ENTERED",
             body={"values": rows},
         ).execute()
+
+    # Mark all invoice records as synced
+    supabase.table("business_records").update({"sync_status": "synced"}).eq("user_id", user_id).eq("record_type", "invoice").execute()
 
     supabase.table("google_integrations").update({
         "last_synced_at": datetime.now(timezone.utc).isoformat(),
